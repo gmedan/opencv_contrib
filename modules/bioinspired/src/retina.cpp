@@ -368,7 +368,7 @@ void RetinaImpl::setup(String retinaParameterFile, const bool applyDefaultSetupO
         cv::FileStorage fs(retinaParameterFile, cv::FileStorage::READ);
         setup(fs, applyDefaultSetupOnFailure);
     }
-    catch(Exception &e)
+    catch(const Exception &e)
     {
         printf("Retina::setup: wrong/unappropriate xml parameter file : error report :`n=>%s\n", e.what());
         if (applyDefaultSetupOnFailure)
@@ -422,7 +422,7 @@ void RetinaImpl::setup(cv::FileStorage &fs, const bool applyDefaultSetupOnFailur
         setupIPLMagnoChannel(_retinaParameters.IplMagno.normaliseOutput, _retinaParameters.IplMagno.parasolCells_beta, _retinaParameters.IplMagno.parasolCells_tau, _retinaParameters.IplMagno.parasolCells_k, _retinaParameters.IplMagno.amacrinCellsTemporalCutFrequency,_retinaParameters.IplMagno.V0CompressionParameter, _retinaParameters.IplMagno.localAdaptintegration_tau, _retinaParameters.IplMagno.localAdaptintegration_k);
 
     }
-    catch(Exception &e)
+    catch(const Exception &e)
     {
         printf("RetinaImpl::setup: resetting retina with default parameters\n");
         if (applyDefaultSetupOnFailure)
@@ -562,7 +562,7 @@ bool RetinaImpl::ocl_run(InputArray inputMatToConvert)
 
 void RetinaImpl::run(InputArray inputMatToConvert)
 {
-    CV_OCL_RUN((_ocl_retina != 0 && inputMatToConvert.isUMat()), ocl_run(inputMatToConvert));
+    CV_OCL_RUN((_ocl_retina && inputMatToConvert.isUMat()), ocl_run(inputMatToConvert));
 
     _wasOCLRunCalled = false;
     // first convert input image to the compatible format : std::valarray<float>
@@ -830,7 +830,7 @@ bool RetinaImpl::_convertCvMat2ValarrayBuffer(InputArray inputMat, std::valarray
 void RetinaImpl::clearBuffers()
 {
 #ifdef HAVE_OPENCL
-    if (_ocl_retina != 0)
+    if (_ocl_retina)
         _ocl_retina->clearBuffers();
 #endif
 

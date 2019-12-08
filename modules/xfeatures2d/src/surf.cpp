@@ -7,7 +7,7 @@
  *
  * There are still serveral lacks for this experimental implementation:
  * 1.The interpolation of sub-pixel mentioned in article was not implemented yet;
- * 2.A comparision with original libSurf.so shows that the hessian detector is not a 100% match to their implementation;
+ * 2.A comparison with original libSurf.so shows that the hessian detector is not a 100% match to their implementation;
  * 3.Due to above reasons, I recommanded the original one for study and reuse;
  *
  * However, the speed of this implementation is something comparable to original one.
@@ -114,6 +114,8 @@ namespace cv
 {
 namespace xfeatures2d
 {
+
+#ifdef OPENCV_ENABLE_NONFREE
 
 static const int   SURF_ORI_SEARCH_INC = 5;
 static const float SURF_ORI_SIGMA      = 2.5f;
@@ -676,7 +678,7 @@ struct SURFInvoker : ParallelLoopBody
             /* Extract a window of pixels around the keypoint of size 20s */
             int win_size = (int)((PATCH_SZ+1)*s);
             CV_Assert( imaxSize >= win_size );
-            Mat win(win_size, win_size, CV_8U, winbuf);
+            Mat win(win_size, win_size, CV_8U, winbuf.data());
 
             if( !upright )
             {
@@ -845,7 +847,7 @@ struct SURFInvoker : ParallelLoopBody
 
             // unit vector is essential for contrast invariance
             vec = descriptors->ptr<float>(k);
-            float scale = (float)(1./(std::sqrt(square_mag) + DBL_EPSILON));
+            float scale = (float)(1./(std::sqrt(square_mag) + FLT_EPSILON));
             for( kk = 0; kk < dsize; kk++ )
                 vec[kk] *= scale;
         }
@@ -942,6 +944,19 @@ void SURF_Impl::detectAndCompute(InputArray _img, InputArray _mask,
             integral(mask1, msum, CV_32S);
         }
         fastHessianDetector( sum, msum, keypoints, nOctaves, nOctaveLayers, (float)hessianThreshold );
+        if (!mask.empty())
+        {
+            for (size_t i = 0; i < keypoints.size(); )
+            {
+                Point pt(keypoints[i].pt);
+                if (mask.at<uchar>(pt.y, pt.x) == 0)
+                {
+                    keypoints.erase(keypoints.begin() + i);
+                    continue; // keep "i"
+                }
+                i++;
+            }
+        }
     }
 
     int i, j, N = (int)keypoints.size();
@@ -1004,6 +1019,16 @@ Ptr<SURF> SURF::create(double _threshold, int _nOctaves, int _nOctaveLayers, boo
 {
     return makePtr<SURF_Impl>(_threshold, _nOctaves, _nOctaveLayers, _extended, _upright);
 }
+
+
+#else // ! #ifdef OPENCV_ENABLE_NONFREE
+Ptr<SURF> SURF::create(double, int, int, bool, bool)
+{
+    CV_Error(Error::StsNotImplemented,
+        "This algorithm is patented and is excluded in this configuration; "
+        "Set OPENCV_ENABLE_NONFREE CMake option and rebuild the library");
+}
+#endif
 
 }
 }

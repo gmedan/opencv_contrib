@@ -53,7 +53,7 @@ using namespace std;
  */
 void CharucoBoard::draw(Size outSize, OutputArray _img, int marginSize, int borderBits) {
 
-    CV_Assert(outSize.area() > 0);
+    CV_Assert(!outSize.empty());
     CV_Assert(marginSize >= 0);
 
     _img.create(outSize, CV_8UC1);
@@ -194,7 +194,7 @@ void CharucoBoard::_getNearestMarkerCorners() {
             double sqDistance;
             Point3f distVector = charucoCorner - center;
             sqDistance = distVector.x * distVector.x + distVector.y * distVector.y;
-            if(j == 0 || fabs(sqDistance - minDist) < 0.0001) {
+            if(j == 0 || fabs(sqDistance - minDist) < cv::pow(0.01 * _squareLength, 2)) {
                 // if same minimum distance (or first iteration), add to nearestMarkerIdx vector
                 nearestMarkerIdx[i].push_back(j);
                 minDist = sqDistance;
@@ -270,50 +270,6 @@ static int _filterCornersWithoutMinMarkers(const Ptr<CharucoBoard> &_board,
     return (int)_filteredCharucoIds.total();
 }
 
-
-/**
-  * ParallelLoopBody class for the parallelization of the charuco corners subpixel refinement
-  * Called from function _selectAndRefineChessboardCorners()
-  */
-class CharucoSubpixelParallel : public ParallelLoopBody {
-    public:
-    CharucoSubpixelParallel(const Mat *_grey, vector< Point2f > *_filteredChessboardImgPoints,
-                            vector< Size > *_filteredWinSizes, const Ptr<DetectorParameters> &_params)
-        : grey(_grey), filteredChessboardImgPoints(_filteredChessboardImgPoints),
-          filteredWinSizes(_filteredWinSizes), params(_params) {}
-
-    void operator()(const Range &range) const CV_OVERRIDE {
-        const int begin = range.start;
-        const int end = range.end;
-
-        for(int i = begin; i < end; i++) {
-            vector< Point2f > in;
-            in.push_back((*filteredChessboardImgPoints)[i]);
-            Size winSize = (*filteredWinSizes)[i];
-            if(winSize.height == -1 || winSize.width == -1)
-                winSize = Size(params->cornerRefinementWinSize, params->cornerRefinementWinSize);
-
-            cornerSubPix(*grey, in, winSize, Size(),
-                         TermCriteria(TermCriteria::MAX_ITER | TermCriteria::EPS,
-                                      params->cornerRefinementMaxIterations,
-                                      params->cornerRefinementMinAccuracy));
-
-            (*filteredChessboardImgPoints)[i] = in[0];
-        }
-    }
-
-    private:
-    CharucoSubpixelParallel &operator=(const CharucoSubpixelParallel &); // to quiet MSVC
-
-    const Mat *grey;
-    vector< Point2f > *filteredChessboardImgPoints;
-    vector< Size > *filteredWinSizes;
-    const Ptr<DetectorParameters> &params;
-};
-
-
-
-
 /**
   * @brief From all projected chessboard corners, select those inside the image and apply subpixel
   * refinement. Returns number of valid corners.
@@ -345,31 +301,33 @@ static int _selectAndRefineChessboardCorners(InputArray _allCorners, InputArray 
 
     // corner refinement, first convert input image to grey
     Mat grey;
-    if(_image.getMat().type() == CV_8UC3)
-        cvtColor(_image.getMat(), grey, COLOR_BGR2GRAY);
+    if(_image.type() == CV_8UC3)
+        cvtColor(_image, grey, COLOR_BGR2GRAY);
     else
-        _image.getMat().copyTo(grey);
+        _image.copyTo(grey);
 
     const Ptr<DetectorParameters> params = DetectorParameters::create(); // use default params for corner refinement
 
     //// For each of the charuco corners, apply subpixel refinement using its correspondind winSize
-    // for(unsigned int i=0; i<filteredChessboardImgPoints.size(); i++) {
-    //    vector<Point2f> in;
-    //    in.push_back(filteredChessboardImgPoints[i]);
-    //    Size winSize = filteredWinSizes[i];
-    //    if(winSize.height == -1 || winSize.width == -1)
-    //        winSize = Size(params.cornerRefinementWinSize, params.cornerRefinementWinSize);
-    //    cornerSubPix(grey, in, winSize, Size(),
-    //                 TermCriteria(TermCriteria::MAX_ITER | TermCriteria::EPS,
-    //                              params->cornerRefinementMaxIterations,
-    //                              params->cornerRefinementMinAccuracy));
-    //    filteredChessboardImgPoints[i] = in[0];
-    //}
+    parallel_for_(Range(0, (int)filteredChessboardImgPoints.size()), [&](const Range& range) {
+        const int begin = range.start;
+        const int end = range.end;
 
-    // this is the parallel call for the previous commented loop (result is equivalent)
-    parallel_for_(
-        Range(0, (int)filteredChessboardImgPoints.size()),
-        CharucoSubpixelParallel(&grey, &filteredChessboardImgPoints, &filteredWinSizes, params));
+        for (int i = begin; i < end; i++) {
+            vector<Point2f> in;
+            in.push_back(filteredChessboardImgPoints[i]);
+            Size winSize = filteredWinSizes[i];
+            if (winSize.height == -1 || winSize.width == -1)
+                winSize = Size(params->cornerRefinementWinSize, params->cornerRefinementWinSize);
+
+            cornerSubPix(grey, in, winSize, Size(),
+                         TermCriteria(TermCriteria::MAX_ITER | TermCriteria::EPS,
+                                      params->cornerRefinementMaxIterations,
+                                      params->cornerRefinementMinAccuracy));
+
+            filteredChessboardImgPoints[i] = in[0];
+        }
+    });
 
     // parse output
     Mat(filteredChessboardImgPoints).copyTo(_selectedCorners);
@@ -616,7 +574,7 @@ void drawDetectedCornersCharuco(InputOutputArray _image, InputArray _charucoCorn
 
 /**
   * Check if a set of 3d points are enough for calibration. Z coordinate is ignored.
-  * Only axis paralel lines are considered
+  * Only axis parallel lines are considered
   */
 static bool _arePointsEnoughForPoseEstimation(const vector< Point3f > &points) {
 
@@ -656,7 +614,7 @@ static bool _arePointsEnoughForPoseEstimation(const vector< Point3f > &points) {
   */
 bool estimatePoseCharucoBoard(InputArray _charucoCorners, InputArray _charucoIds,
                               const Ptr<CharucoBoard> &_board, InputArray _cameraMatrix, InputArray _distCoeffs,
-                              OutputArray _rvec, OutputArray _tvec, bool useExtrinsicGuess) {
+                              InputOutputArray _rvec, InputOutputArray _tvec, bool useExtrinsicGuess) {
 
     CV_Assert((_charucoCorners.getMat().total() == _charucoIds.getMat().total()));
 
@@ -754,10 +712,10 @@ void detectCharucoDiamond(InputArray _image, InputArrayOfArrays _markerCorners,
 
     // convert input image to grey
     Mat grey;
-    if(_image.getMat().type() == CV_8UC3)
-        cvtColor(_image.getMat(), grey, COLOR_BGR2GRAY);
+    if(_image.type() == CV_8UC3)
+        cvtColor(_image, grey, COLOR_BGR2GRAY);
     else
-        _image.getMat().copyTo(grey);
+        _image.copyTo(grey);
 
     // for each of the detected markers, try to find a diamond
     for(unsigned int i = 0; i < _markerIds.total(); i++) {

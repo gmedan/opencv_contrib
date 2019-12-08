@@ -207,6 +207,29 @@ void colormap(const Mat& quantized, Mat& dst)
   }
 }
 
+void drawFeatures(InputOutputArray img, const std::vector<Template>& templates, const Point2i& tl, int size)
+{
+#ifdef HAVE_OPENCV_IMGPROC
+    static Scalar colors[] = {{0, 0, 255}, {0, 255, 0}};
+    static int markers[] = {MARKER_SQUARE, MARKER_DIAMOND};
+
+    int modality = 0;
+    for(const Template& t : templates)
+    {
+        if(t.pyramid_level != 0) continue;
+
+        for(const Feature& f : t.features)
+        {
+            drawMarker(img, tl + Point(f.x, f.y), colors[int(modality != 0)], markers[int(modality != 0)], size);
+        }
+
+        modality++;
+    }
+#else
+    CV_Assert(false, "functionality needs imgproc module");
+#endif
+}
+
 /****************************************************************************************\
 *                             Color gradient modality                                    *
 \****************************************************************************************/
@@ -254,11 +277,11 @@ static void quantizedOrientations(const Mat& src, Mat& magnitude,
   float * ptr0y = (float *)sobel_dy.data;
   float * ptrmg = (float *)magnitude.data;
 
-  const int length1 = static_cast<const int>(sobel_3dx.step1());
-  const int length2 = static_cast<const int>(sobel_3dy.step1());
-  const int length3 = static_cast<const int>(sobel_dx.step1());
-  const int length4 = static_cast<const int>(sobel_dy.step1());
-  const int length5 = static_cast<const int>(magnitude.step1());
+  const int length1 = static_cast<int>(sobel_3dx.step1());
+  const int length2 = static_cast<int>(sobel_3dy.step1());
+  const int length3 = static_cast<int>(sobel_dx.step1());
+  const int length4 = static_cast<int>(sobel_dy.step1());
+  const int length5 = static_cast<int>(magnitude.step1());
   const int length0 = sobel_3dy.cols * 3;
 
   for (int r = 0; r < sobel_3dy.rows; ++r)
@@ -524,6 +547,11 @@ ColorGradient::ColorGradient(float _weak_threshold, size_t _num_features, float 
     num_features(_num_features),
     strong_threshold(_strong_threshold)
 {
+}
+
+Ptr<ColorGradient> ColorGradient::create(float weak_threshold, size_t num_features, float strong_threshold)
+{
+    return makePtr<ColorGradient>(weak_threshold, num_features, strong_threshold);
 }
 
 static const char CG_NAME[] = "ColorGradient";
@@ -841,6 +869,12 @@ DepthNormal::DepthNormal(int _distance_threshold, int _difference_threshold, siz
 {
 }
 
+Ptr<DepthNormal> DepthNormal::create(int distance_threshold, int difference_threshold, size_t num_features,
+                                     int extract_threshold)
+{
+    return makePtr<DepthNormal>(distance_threshold, difference_threshold, num_features, extract_threshold);
+}
+
 static const char DN_NAME[] = "DepthNormal";
 
 String DepthNormal::name() const
@@ -958,8 +992,8 @@ static void spread(const Mat& src, Mat& dst, int T)
     int height = src.rows - r;
     for (int c = 0; c < T; ++c)
     {
-      orUnaligned8u(&src.at<unsigned char>(r, c), static_cast<const int>(src.step1()), dst.ptr(),
-                    static_cast<const int>(dst.step1()), src.cols - c, height);
+      orUnaligned8u(&src.at<unsigned char>(r, c), static_cast<int>(src.step1()), dst.ptr(),
+                    static_cast<int>(dst.step1()), src.cols - c, height);
     }
   }
 }
